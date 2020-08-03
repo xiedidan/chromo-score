@@ -102,6 +102,132 @@ class ChromoDataset(Dataset):
             
         return img, self.labels[self.indices[index]]
 
+def uda_collate_fn(batches):
+    imgs = []
+    labels = []
+    
+    for batch in batches:
+        batch_imgs, batch_label = batch
+        
+        imgs.append(batch_imgs)
+        labels.append(batch_label)
+        
+    return torch.cat(imgs, dim=0), torch.tensor(labels)
+    
+class UdaDataset(Dataset):
+    def __init__(
+        self,
+        root_path,
+        training=True,
+        image_ext='.png',
+        test_ratio=0.1,
+        unsup_ratio=0,
+        unsup_copy=1,
+        sup_transform=None,
+        unsup_transform=None
+    ):
+        self.root_path = root_path
+        self.training = training
+        self.sup_transform = sup_transform
+        self.unsup_transform = unsup_transform
+        self.unsup_ratio = unsup_ratio
+        self.unsup_copy = unsup_copy
+        
+        # supervision
+        # train / val split per image
+        self.sup_path = os.path.join(root_path, 'labeled')
+        
+        pos_filenames = os.listdir(os.path.join(self.sup_path, '1'))
+        neg_filenames = os.listdir(os.path.join(self.sup_path, '0'))
+        img_filenames = []
+        self.labels = []
+        
+        for pos_filename in pos_filenames:
+            if image_ext in pos_filename:
+                img_filenames.append(pos_filename)
+                self.labels.append(1)
+                
+        for neg_filename in neg_filenames:
+            if image_ext in neg_filename:
+                img_filenames.append(neg_filename)
+                self.labels.append(0)
+                
+        self.img_filenames = img_filenames
+        
+        train_indices, val_indices, _, _ = train_test_split(
+            list(range(len(self.img_filenames))),
+            self.labels,
+            test_size=test_ratio,
+            random_state=0,
+            stratify=self.labels
+        )
+        
+        if self.training:
+            self.indices = train_indices
+        else:
+            self.indices = val_indices
+            
+        print('Phase: {}, Supervision samples: {}'.format('Train' if self.training else 'Val', len(self.indices)))
+        
+        if self.training and (self.unsup_ratio > 0):
+            self.unsup_list = []
+            
+            self.unsup_path = os.path.join(self.root_path, 'unlabeled')
+            unsup_filenames = os.listdir(os.path.join(self.unsup_path, 'original'))
+            
+            for unsup_filename in unsup_filenames:
+                if image_ext in unsup_filename:
+                    self.unsup_list.append(os.path.join(self.unsup_path, 'original', unsup_filename))
+                    
+            print('Phase: {}, Unsupervision samples: {}'.format('Train' if self.training else 'Val', len(self.unsup_list)))
+            
+    def __len__(self):
+        return len(self.indices)
+        
+    def __getitem__(self, index):
+        # supervision
+        label = self.labels[self.indices[index]]
+        
+        img_file = os.path.join(
+            self.sup_path,
+            '{}'.format(label),
+            self.img_filenames[self.indices[index]]
+        )
+        img = cv2.imread(img_file)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        if self.sup_transform is not None:
+            img = self.sup_transform(img)
+        
+        if self.training:
+            # unsupervision
+            unsup_raws = []
+            unsup_augs = []
+
+            if self.unsup_ratio > 0:
+                unsup_files = random.sample(self.unsup_list, self.unsup_ratio)
+
+                for unsup_file in unsup_files:
+                    unsup_img = cv2.imread(unsup_file)
+                    unsup_img = cv2.cvtColor(unsup_img, cv2.COLOR_BGR2RGB)
+
+                    unsup_img = self.unsup_transform(unsup_img)
+                    unsup_raws.append(unsup_img.clone())
+
+                    for i in range(self.unsup_copy):
+                        unsup_aug = self.unsup_transform(unsup_img)
+                        unsup_augs.append(unsup_aug.clone())
+
+            imgs = torch.cat([
+                img.unsqueeze(0),
+                torch.stack(unsup_augs, dim=0),
+                torch.stack(unsup_raws, dim=0)
+            ], dim=0)
+
+            return imgs, label
+        else:
+            return img, label
+    
 class SegmentationDataset(Dataset):
     def __init__(
         self,
@@ -113,7 +239,7 @@ class SegmentationDataset(Dataset):
     ):
         self.root_path = root_path
         self.training = training
-        self.transform = transform 
+        self.transform = transform
         
         # train / val split per image
         filenames = os.listdir(os.path.join(root_path, 'images'))
