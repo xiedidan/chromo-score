@@ -15,7 +15,6 @@ import torchvision
 import torchvision.transforms as transforms
 from sklearn.model_selection import train_test_split
 
-
 class PadSquare():
     def __init__(self, fill=255):
         self.fill = fill
@@ -102,17 +101,24 @@ class ChromoDataset(Dataset):
             
         return img, self.labels[self.indices[index]]
 
-def uda_collate_fn(batches):
+def uda_collate_fn(batches, unsup_ratio=1, unsup_copy=1):
     imgs = []
     labels = []
+    
+    sup_imgs = []
+    unsup_raws = []
+    unsup_augs = []
     
     for batch in batches:
         batch_imgs, batch_label = batch
         
-        imgs.append(batch_imgs)
-        labels.append(batch_label)
+        sup_imgs.append(batch_imgs[0].unsqueeze(0))
+        unsup_raws.append(batch_imgs[1:(1+unsup_ratio)])
+        unsup_augs.append(batch_imgs[(1+unsup_ratio):])
         
-    return torch.cat(imgs, dim=0), torch.tensor(labels)
+        labels.append(batch_label)
+    
+    return torch.cat(sup_imgs, dim=0), torch.cat(unsup_raws, dim=0), torch.cat(unsup_augs, dim=0), torch.tensor(labels)
     
 class UdaDataset(Dataset):
     def __init__(

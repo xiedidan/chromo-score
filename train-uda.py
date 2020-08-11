@@ -1,11 +1,14 @@
 import os
 import sys
 import argparse
+from functools import partial
 
 import torch
 import torch.nn as nn
+import torch.distributed as dist
 from torch.optim import lr_scheduler
 import torch.optim as optim
+from torch.utils.data.distributed import DistributedSampler
 import torchvision
 import torchvision.transforms as transforms
 from sklearn import metrics
@@ -13,11 +16,12 @@ from sklearn import metrics
 from dataset import *
 from resnet import *
 from uda_classifier import *
-from sampler import BalancedStatisticSampler
+from sampler import *
 
 # args
 parser = argparse.ArgumentParser(description='Chromo Scorer Training')
-parser.add_argument('--device', default='cuda', help='device (cuda / cpu)')
+parser.add_argument('--local_rank', default=-1, type=int, help='node rank for distributed training')
+# parser.add_argument('--device', default='cuda', help='device (cuda / cpu)')
 parser.add_argument('--batch_size', default=16, type=int, help='batch size')
 parser.add_argument('--root_path', default='./data/fire', help='dataset root path')
 parser.add_argument('--lr', default=1e-6, type=float, help='learning rate')
@@ -46,7 +50,7 @@ BATCH_SIZE = flags.batch_size
 NUM_WORKERS = 32
 
 # trainer consts
-DEVICE = flags.device
+# DEVICE = flags.device
 LR = flags.lr
 EPOCH = flags.epochs
 STEP = flags.scheduler_step
@@ -56,6 +60,10 @@ UNSUP_RATIO = flags.unsup_ratio
 UNSUP_COPY = flags.unsup_copy
 UNSUP_SOFTMAX_TEMP = flags.unsup_softmax_temp
 UNSUP_CONFIDENCE_THRES = flags.unsup_confidence_thres
+
+# distribution
+dist.init_process_group(backend='nccl')
+torch.cuda.set_device(flags.local_rank)
 
 # data
 train_trans = transforms.Compose([
@@ -99,34 +107,37 @@ val_dataset = UdaDataset(
 )
 
 train_labels = [train_dataset.labels[i] for i in train_dataset.indices]
-train_sampler = BalancedStatisticSampler(
+train_sampler = DistributedBalancedStatisticSampler(
     train_labels,
     NUM_CLASSES,
     BATCH_SIZE
 )
+# val_sampler = DistributedSampler(val_dataset.indices, shuffle=False)
 
 train_loader = DataLoader(
     train_dataset,
     batch_sampler=train_sampler,
-    collate_fn=uda_collate_fn,
+    collate_fn=partial(uda_collate_fn, unsup_ratio=UNSUP_RATIO, unsup_copy=UNSUP_COPY),
     num_workers=NUM_WORKERS,
     pin_memory=True
 )
 val_loader = DataLoader(
     val_dataset,
     batch_size=BATCH_SIZE,
+    # batch_sampler=val_sampler,
     shuffle=False,
     num_workers=NUM_WORKERS,
     pin_memory=True
 )
 
 # model
-device = torch.device(DEVICE)
+# device = torch.device(DEVICE)
 
 model = resnet50(pretrained=True, num_classes=NUM_CLASSES)
-if torch.cuda.device_count() > 1:
-    model = nn.DataParallel(model)
-model = model.to(device)
+model = model.cuda()
+model = nn.parallel.DistributedDataParallel(model, device_ids=[flags.local_rank])
+    
+# model = model.to(device)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 scheduler = lr_scheduler.StepLR(optimizer, STEP, gamma=GAMMA, last_epoch=-1)
@@ -136,8 +147,8 @@ unsup_criterion = KL_Divergence_with_Logits()
 if __name__ == '__main__':
     train_uda(
         TRAIN_NAME, TRAIN_ID,
-        model, device,
-        train_loader, val_loader,
+        model,
+        train_sampler, train_loader, val_loader,
         sup_criterion,
         optimizer, scheduler, 
         epochs=EPOCH, 
@@ -146,5 +157,6 @@ if __name__ == '__main__':
         unsup_weight=UNSUP_WEIGHT,
         unsup_softmax_temp=UNSUP_SOFTMAX_TEMP,
         unsup_confidence_thres=UNSUP_CONFIDENCE_THRES,
-        unsup_ratio=UNSUP_RATIO, unsup_copy=UNSUP_COPY
+        unsup_ratio=UNSUP_RATIO, unsup_copy=UNSUP_COPY,
+        local_rank=flags.local_rank
     )
