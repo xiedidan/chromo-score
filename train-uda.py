@@ -24,19 +24,28 @@ parser.add_argument('--local_rank', default=-1, type=int, help='node rank for di
 # parser.add_argument('--device', default='cuda', help='device (cuda / cpu)')
 parser.add_argument('--batch_size', default=16, type=int, help='batch size')
 parser.add_argument('--root_path', default='./data/fire', help='dataset root path')
-parser.add_argument('--lr', default=1e-6, type=float, help='learning rate')
+parser.add_argument('--lr', default=1e-3, type=float, help='learning rate')
 parser.add_argument('--scheduler_step', default=15, type=int, help='epoch to reduce learning rate')
 parser.add_argument('--scheduler_gamma', default=0.1, type=float, help='step scheduler gamma')
 parser.add_argument('--train_name', default='score', help='train name')
 parser.add_argument('--train_id', default='01', help='train id')
-parser.add_argument('--epochs', default=20, type=int, help='epoch to train')
+parser.add_argument('--epoch', default=20, type=int, help='epoch to train')
+parser.add_argument('--warmup_epoch', default=10, type=int, help='epoch to warmup')
+parser.add_argument('--warmup_gamma', default=0.1, type=float, help='warmup learning rate ratio')
 parser.add_argument('--unsup_weight', default=1., type=float, help='unsupervision loss weight, defaults to 1.0')
 parser.add_argument('--unsup_ratio', default=1, type=int, help='unsupervision batch ratio, set 0 to disable unsupervision')
 parser.add_argument('--unsup_copy', default=1, type=int, help='unsupervision augment copy for each unsupervision sample')
 parser.add_argument('--unsup_confidence_thres', default=0.8, type=float, help='unsupervision confidence threshold, 0.8 for CIFAR and 0.5 for ImageNet')
 parser.add_argument('--unsup_softmax_temp', default=0.4, type=float, help='unsupervision softmax temperature, 0.4 for cv tasks')
+parser.add_argument('--balance_thres', default=-1., type=float, help='unsupervision only with balanced predictions')
 flags = parser.parse_args()
 
+if flags.local_rank == 0:
+    print('\nAll Flags:\n')
+    for k, v in sorted(vars(flags).items()):
+        print('{}: {}'.format(k, v))
+    print('\n')
+    
 # consts
 TRAIN_NAME = flags.train_name
 TRAIN_ID = flags.train_id
@@ -47,19 +56,22 @@ NUM_CLASSES = 2 # fg + 1(bg)
 INPUT_SIZE = 512
 # BATCH_SIZE = 16 * 2
 BATCH_SIZE = flags.batch_size
-NUM_WORKERS = 32
+NUM_WORKERS = 8
 
 # trainer consts
 # DEVICE = flags.device
 LR = flags.lr
-EPOCH = flags.epochs
-STEP = flags.scheduler_step
+EPOCH = flags.epoch
+WARMUP_EPOCH = flags.warmup_epoch
+WARMUP_GAMMA= flags.warmup_gamma
+STEP = flags.scheduler_step - flags.warmup_epoch
 GAMMA = flags.scheduler_gamma
 UNSUP_WEIGHT = flags.unsup_weight
 UNSUP_RATIO = flags.unsup_ratio
 UNSUP_COPY = flags.unsup_copy
 UNSUP_SOFTMAX_TEMP = flags.unsup_softmax_temp
 UNSUP_CONFIDENCE_THRES = flags.unsup_confidence_thres
+BALANCE_THRES = flags.balance_thres
 
 # distribution
 dist.init_process_group(backend='nccl')
@@ -139,7 +151,7 @@ model = nn.parallel.DistributedDataParallel(model, device_ids=[flags.local_rank]
     
 # model = model.to(device)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+optimizer = torch.optim.Adam(model.parameters(), lr=LR if WARMUP_EPOCH <= 0 else LR*WARMUP_GAMMA)
 scheduler = lr_scheduler.StepLR(optimizer, STEP, gamma=GAMMA, last_epoch=-1)
 sup_criterion = nn.CrossEntropyLoss()
 unsup_criterion = KL_Divergence_with_Logits()
@@ -152,11 +164,13 @@ if __name__ == '__main__':
         sup_criterion,
         optimizer, scheduler, 
         epochs=EPOCH, 
+        warmup_epoch=WARMUP_EPOCH, warmup_gamma=WARMUP_GAMMA,
         metric=metrics.accuracy_score, 
         unsup_criterion=unsup_criterion,
         unsup_weight=UNSUP_WEIGHT,
         unsup_softmax_temp=UNSUP_SOFTMAX_TEMP,
         unsup_confidence_thres=UNSUP_CONFIDENCE_THRES,
         unsup_ratio=UNSUP_RATIO, unsup_copy=UNSUP_COPY,
+        balance_thres=BALANCE_THRES,
         local_rank=flags.local_rank
     )
