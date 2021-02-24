@@ -234,6 +234,55 @@ class UdaDataset(Dataset):
         else:
             return img, label
     
+def simsiam_collate_fn(batches, unsup_ratio=1, unsup_copy=1):
+    x1s = []
+    x2s = []
+    
+    for batch in batches:
+        x1, x2 = batch
+        
+        x1s.append(x1)
+        x2s.append(x2)
+
+    return torch.stack(x1s), torch.stack(x2s)
+
+class SimSiamDataset(Dataset):
+    def __init__(
+        self,
+        root_path,
+        transform,
+        image_ext='.png'
+    ):
+        self.root_path = root_path
+        self.transform = transform
+        self.image_ext = image_ext
+
+        filenames = os.listdir(self.root_path)
+        img_filenames = []
+
+        for filename in filenames:
+            if self.image_ext in filename:
+                img_filenames.append(filename)
+
+        self.img_filenames = img_filenames
+
+    def __len__(self):
+        return len(self.img_filenames)
+
+    def __getitem__(self, index):
+        img_file = os.path.join(
+            self.root_path,
+            self.img_filenames[index]
+        )
+
+        img = cv2.imread(img_file)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        x1 = self.transform(img.copy())
+        x2 = self.transform(img)
+
+        return x1, x2
+
 class SegmentationDataset(Dataset):
     def __init__(
         self,
