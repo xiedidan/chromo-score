@@ -2,6 +2,9 @@ import torch
 from torch import nn, optim
 from torch.nn import functional as F
 
+DEFAULT_LR = 1e-3
+DEFAULT_TEMP = 1.5
+DEFAULT_MAX_ITER = 1e5
 
 class ModelWithTemperature(nn.Module):
     """
@@ -11,10 +14,13 @@ class ModelWithTemperature(nn.Module):
         NB: Output of the neural network should be the classification logits,
             NOT the softmax (or log softmax)!
     """
-    def __init__(self, model):
+    def __init__(self, model, lr=DEFAULT_LR, temperature=DEFAULT_TEMP, max_iter=DEFAULT_MAX_ITER):
         super(ModelWithTemperature, self).__init__()
+        self.lr = lr
+        self.max_iter = max_iter
+        
         self.model = model
-        self.temperature = nn.Parameter(torch.ones(1) * 1.5)
+        self.temperature = nn.Parameter(torch.ones(1) * temperature)
 
     def forward(self, input):
         logits = self.model(input)
@@ -57,7 +63,7 @@ class ModelWithTemperature(nn.Module):
         print('Before temperature - NLL: %.3f, ECE: %.3f' % (before_temperature_nll, before_temperature_ece))
 
         # Next: optimize the temperature w.r.t. NLL
-        optimizer = optim.LBFGS([self.temperature], lr=0.1, max_iter=100000)
+        optimizer = optim.LBFGS([self.temperature], lr=self.lr, max_iter=self.max_iter)
 
         def eval():
             loss = nll_criterion(self.temperature_scale(logits), labels)
