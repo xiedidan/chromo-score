@@ -57,7 +57,7 @@ class ModelWithTemperature(nn.Module):
         print('Before temperature - NLL: %.3f, ECE: %.3f' % (before_temperature_nll, before_temperature_ece))
 
         # Next: optimize the temperature w.r.t. NLL
-        optimizer = optim.LBFGS([self.temperature], lr=0.01, max_iter=50)
+        optimizer = optim.LBFGS([self.temperature], lr=0.1, max_iter=100000)
 
         def eval():
             loss = nll_criterion(self.temperature_scale(logits), labels)

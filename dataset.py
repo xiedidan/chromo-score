@@ -459,3 +459,45 @@ class SegSliceDataset(Dataset):
             img = self.transform(self.xs[index])
             
         return img, self.ys[index]
+
+class ConfiCaliDataset(Dataset):
+    def __init__(
+        self,
+        root_path,
+        image_ext='.png',
+        num_classes=2,
+        transform=None
+    ):
+        self.root_path = root_path
+        self.image_ext = image_ext
+        self.num_classes = num_classes
+        self.transform = transform
+        
+        self.filenames = []
+        self.labels = []
+        
+        for i in range(num_classes):
+            cls_filenames = os.listdir(os.path.join(self.root_path, '{}'.format(i)))
+            cls_filenames = [f for f in cls_filenames if self.image_ext in f]
+            
+            for f in cls_filenames:
+                self.filenames.append(os.path.join(self.root_path, '{}/{}'.format(i, f)))
+                self.labels.append(i)
+            
+    def __len__(self):
+        return len(self.filenames)
+        
+    def __getitem__(self, index):
+        img_file = os.path.join(
+            self.root_path,
+            self.filenames[index]
+        )
+
+        img = cv2.imread(img_file)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        if self.transform is not None:
+            img = self.transform(img)
+            
+        return img, self.labels[index]
+    
