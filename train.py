@@ -19,7 +19,7 @@ from sampler import BalancedStatisticSampler
 parser = argparse.ArgumentParser(description='Chromo Scorer Training')
 parser.add_argument('--device', default='cuda', help='device (cuda / cpu)')
 parser.add_argument('--batch_size', default=16, type=int, help='batch size')
-parser.add_argument('--root_path', default='./data/fire', help='dataset root path')
+parser.add_argument('--root_path', default='./data', help='dataset root path')
 parser.add_argument('--lr', default=1e-6, type=float, help='learning rate')
 parser.add_argument('--scheduler_step', default=15, type=int, help='epoch to reduce learning rate')
 parser.add_argument('--scheduler_gamma', default=0.1, type=float, help='step scheduler gamma')
@@ -38,7 +38,7 @@ NUM_CLASSES = 2 # fg + 1(bg)
 INPUT_SIZE = 512
 # BATCH_SIZE = 16 * 2
 BATCH_SIZE = flags.batch_size
-NUM_WORKERS = 8
+NUM_WORKERS = 16
 
 # trainer consts
 DEVICE = flags.device
@@ -86,7 +86,6 @@ val_dataset = ChromoDataset(
 )
 
 train_labels = [train_dataset.labels[i] for i in train_dataset.indices]
-print(train_dataset.labels.count(1))
 train_sampler = BalancedStatisticSampler(
     train_labels,
     NUM_CLASSES,
