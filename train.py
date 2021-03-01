@@ -26,6 +26,7 @@ parser.add_argument('--scheduler_gamma', default=0.1, type=float, help='step sch
 parser.add_argument('--train_name', default='score', help='train name')
 parser.add_argument('--train_id', default='01', help='train id')
 parser.add_argument('--epochs', default=20, type=int, help='epoch to train')
+parser.add_argument('--checkpoint', default=None, help='checkpoint path')
 flags = parser.parse_args()
 
 # consts
@@ -46,6 +47,7 @@ LR = flags.lr
 EPOCH = flags.epochs
 STEP = flags.scheduler_step
 GAMMA = flags.scheduler_gamma
+CHECKPOINT = flags.checkpoint
 
 # data
 train_trans = transforms.Compose([
@@ -110,8 +112,13 @@ val_loader = DataLoader(
 device = torch.device(DEVICE)
 
 model = resnet50(pretrained=True, num_classes=NUM_CLASSES)
+
 if torch.cuda.device_count() > 1:
     model = nn.DataParallel(model)
+    
+if CHECKPOINT is not None:
+    model.load_state_dict(torch.load(CHECKPOINT))
+    
 model = model.to(device)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
